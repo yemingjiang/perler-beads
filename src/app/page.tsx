@@ -185,6 +185,24 @@ export default function Home() {
   // 新增：横屏设备弹窗状态
   const [showDesktopModal, setShowDesktopModal] = useState<boolean>(false);
 
+  // 新增：编辑撤回历史栈（多步）
+  interface EditSnapshot {
+    mappedPixelData: MappedPixel[][];
+    colorCounts: { [key: string]: { count: number; color: string } };
+    totalBeadCount: number;
+  }
+  const [editHistory, setEditHistory] = useState<EditSnapshot[]>([]);
+
+  // 新增：一键去背景撤回快照（单步）
+  const [bgRemovalSnapshot, setBgRemovalSnapshot] = useState<EditSnapshot | null>(null);
+
+  // 新增：轻量提示
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const showToast = useCallback((msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 2000);
+  }, []);
+
   // 放大镜切换处理函数
   const handleToggleMagnifier = () => {
     const newActiveState = !isMagnifierActive;
@@ -205,38 +223,80 @@ export default function Home() {
     setActiveFloatingTool('magnifier');
   };
 
+  // --- 撤回功能 ---
+
+  // 保存编辑快照到历史栈
+  const saveEditSnapshot = useCallback(() => {
+    if (!mappedPixelData || !colorCounts) return;
+    const snapshot: EditSnapshot = {
+      mappedPixelData: mappedPixelData.map(row => row.map(cell => ({ ...cell }))),
+      colorCounts: { ...colorCounts },
+      totalBeadCount,
+    };
+    setEditHistory(prev => [...prev.slice(-49), snapshot]);
+  }, [mappedPixelData, colorCounts, totalBeadCount]);
+
+  // 编辑模式多步撤回
+  const handleUndoEdit = useCallback(() => {
+    if (editHistory.length === 0) return;
+    const snapshot = editHistory[editHistory.length - 1];
+    setMappedPixelData(snapshot.mappedPixelData);
+    setColorCounts(snapshot.colorCounts);
+    setTotalBeadCount(snapshot.totalBeadCount);
+    setEditHistory(prev => prev.slice(0, -1));
+    showToast('已撤回上一步');
+  }, [editHistory, showToast]);
+
+  // 一键去背景单步撤回
+  const handleUndoBgRemoval = useCallback(() => {
+    if (!bgRemovalSnapshot) return;
+    setMappedPixelData(bgRemovalSnapshot.mappedPixelData);
+    setColorCounts(bgRemovalSnapshot.colorCounts);
+    setTotalBeadCount(bgRemovalSnapshot.totalBeadCount);
+    setBgRemovalSnapshot(null);
+    showToast('已撤回背景去除');
+  }, [bgRemovalSnapshot, showToast]);
+
+  // 清空编辑历史（参数变化、退出编辑模式等时调用）
+  const clearEditHistory = useCallback(() => {
+    setEditHistory([]);
+  }, []);
+
   // 放大镜像素编辑处理函数
   const handleMagnifierPixelEdit = (row: number, col: number, colorData: { key: string; color: string }) => {
     if (!mappedPixelData) return;
-    
+
+    const oldPixel = mappedPixelData[row][col];
+    if (!oldPixel || oldPixel.key === colorData.key) return;
+
     // 创建新的像素数据
     const newMappedPixelData = mappedPixelData.map((rowData, r) =>
       rowData.map((pixel, c) => {
         if (r === row && c === col) {
-          return { 
-            key: colorData.key, 
-            color: colorData.color 
+          return {
+            key: colorData.key,
+            color: colorData.color
           } as MappedPixel;
         }
         return pixel;
       })
     );
-    
+
+    saveEditSnapshot();
     setMappedPixelData(newMappedPixelData);
-    
+
     // 更新颜色统计
     if (colorCounts) {
       const newColorCounts = { ...colorCounts };
-      
+
       // 减少原颜色的计数
-      const oldPixel = mappedPixelData[row][col];
       if (newColorCounts[oldPixel.key]) {
         newColorCounts[oldPixel.key].count--;
         if (newColorCounts[oldPixel.key].count === 0) {
           delete newColorCounts[oldPixel.key];
         }
       }
-      
+
       // 增加新颜色的计数
       if (newColorCounts[colorData.key]) {
         newColorCounts[colorData.key].count++;
@@ -246,9 +306,9 @@ export default function Home() {
           color: colorData.color
         };
       }
-      
+
       setColorCounts(newColorCounts);
-      
+
       // 更新总计数
       const newTotal = Object.values(newColorCounts).reduce((sum, item) => sum + item.count, 0);
       setTotalBeadCount(newTotal);
@@ -988,6 +1048,13 @@ export default function Home() {
     setSelectedColor(null);
   }; // 正确闭合 pixelateImage 函数
 
+  // 当 remapTrigger 变化时清空撤回历史（参数调整/颜色排除/新图上传等均会触发 remap）
+  useEffect(() => {
+    clearEditHistory();
+    setBgRemovalSnapshot(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [remapTrigger]);
+
   // 修改useEffect中的pixelateImage调用，加入模式参数
   useEffect(() => {
     if (originalImageSrc && activeBeadPalette.length > 0) {
@@ -1231,6 +1298,8 @@ export default function Home() {
         // ++ Exit manual mode if colors are excluded/included ++
         setIsManualColoringMode(false);
         setSelectedColor(null);
+        clearEditHistory();
+        setBgRemovalSnapshot(null);
     };
 
   // 一键去背景：识别边缘主色并洪水填充去除
@@ -1239,6 +1308,15 @@ export default function Home() {
       alert('请先生成图纸后再使用一键去背景。');
       return;
     }
+
+    // 保存快照用于单步撤回
+    setBgRemovalSnapshot({
+      mappedPixelData: mappedPixelData.map(row => row.map(cell => ({ ...cell }))),
+      colorCounts: colorCounts ? { ...colorCounts } : {},
+      totalBeadCount,
+    });
+    // 去背景会大幅改变数据，清空编辑撤回历史
+    setEditHistory([]);
 
     const { N, M } = gridDimensions;
     const borderCounts = new Map<string, number>();
@@ -1378,8 +1456,9 @@ export default function Home() {
     }
     
     // 更新状态
+    saveEditSnapshot();
     setMappedPixelData(newPixelData);
-    
+
     // 重新计算颜色统计
     if (colorCounts) {
       const newColorCounts: { [hexKey: string]: { count: number; color: string } } = {};
@@ -1487,6 +1566,7 @@ export default function Home() {
 
         // Only update if state changes
         if (newCellData.key !== previousKey || newCellData.isExternal !== wasExternal) {
+          saveEditSnapshot();
           newPixelData[j][i] = newCellData;
           setMappedPixelData(newPixelData);
 
@@ -1821,6 +1901,7 @@ export default function Home() {
 
     if (replaceCount > 0) {
       // 更新像素数据
+      saveEditSnapshot();
       setMappedPixelData(newPixelData);
 
       // 重新计算颜色统计
@@ -1882,6 +1963,7 @@ export default function Home() {
     <>
     {/* 添加自定义动画样式 */}
     <style dangerouslySetInnerHTML={{ __html: floatAnimation }} />
+    <style dangerouslySetInnerHTML={{ __html: '@keyframes toastFadeInOut{0%{opacity:0;transform:translate(-50%,10px)}15%{opacity:1;transform:translate(-50%,0)}85%{opacity:1;transform:translate(-50%,0)}100%{opacity:0;transform:translate(-50%,-10px)}}' }} />
     
     {/* PWA 安装按钮 */}
     <InstallPWA />
@@ -2245,6 +2327,13 @@ export default function Home() {
                     className="inline-flex items-center justify-center h-9 px-3 text-sm rounded-md border border-blue-200 dark:border-blue-700 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-200 hover:bg-blue-100 dark:hover:bg-blue-800/40 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
                   >
                     一键去背景
+                  </button>
+                  <button
+                    onClick={handleUndoBgRemoval}
+                    disabled={!bgRemovalSnapshot}
+                    className="inline-flex items-center justify-center h-9 px-3 text-sm rounded-md border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                  >
+                    回撤上一步
                   </button>
                 </div>
 
@@ -2614,6 +2703,7 @@ export default function Home() {
           setHighlightColorKey(null);
           setIsMagnifierActive(false);
           setMagnifierSelectionArea(null);
+          clearEditHistory();
         }}
         onToggleMagnifier={handleToggleMagnifier}
         isMagnifierActive={isMagnifierActive}
@@ -2639,6 +2729,8 @@ export default function Home() {
           onToggleOpen={() => setIsFloatingPaletteOpen(!isFloatingPaletteOpen)}
           isActive={activeFloatingTool === 'palette'}
           onActivate={handleActivatePalette}
+          canUndo={editHistory.length > 0}
+          onUndo={handleUndoEdit}
         />
       )}
 
@@ -2719,6 +2811,14 @@ export default function Home() {
         gridDimensions={gridDimensions}
         selectedColorSystem={selectedColorSystem}
       />
+
+      {/* 轻量提示 Toast */}
+      {toastMessage && (
+        <div className="fixed bottom-20 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white px-4 py-2 rounded-lg shadow-lg z-[200] text-sm whitespace-nowrap"
+             style={{ animation: 'toastFadeInOut 2s ease-in-out' }}>
+          {toastMessage}
+        </div>
+      )}
     </div>
    </>
   );
