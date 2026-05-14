@@ -24,6 +24,8 @@ interface FloatingColorPaletteProps {
   onToggleOpen: () => void;
   isActive: boolean;
   onActivate: () => void;
+  canUndo: boolean;
+  onUndo: () => void;
 }
 
 const FloatingColorPalette: React.FC<FloatingColorPaletteProps> = ({
@@ -43,7 +45,9 @@ const FloatingColorPalette: React.FC<FloatingColorPaletteProps> = ({
   isOpen,
   onToggleOpen,
   isActive,
-  onActivate
+  onActivate,
+  canUndo,
+  onUndo
 }) => {
   // 计算初始位置，确保左边缘在屏幕内（小屏幕时右边缘可以超出）
   const getInitialPosition = () => ({
@@ -231,6 +235,18 @@ const FloatingColorPalette: React.FC<FloatingColorPaletteProps> = ({
 
           {/* 工具按钮行 */}
           <div className="flex gap-2 mb-3">
+            {/* 撤回按钮 */}
+            <button
+              onClick={onUndo}
+              disabled={!canUndo}
+              className="p-2 rounded-lg border transition-all duration-200 flex items-center justify-center text-xs bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 border-gray-300 dark:border-gray-600 hover:bg-gray-200 dark:hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed"
+              title="撤回上一步"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a5 5 0 015 5v2M3 10l4-4M3 10l4 4" />
+              </svg>
+            </button>
+
             {/* 橡皮擦按钮 */}
             <button
               onClick={() => handleColorClick({ key: TRANSPARENT_KEY, color: '#FFFFFF' })}
