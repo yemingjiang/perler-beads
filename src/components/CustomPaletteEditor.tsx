@@ -5,6 +5,8 @@ import { PaletteColor } from '../utils/pixelation';
 import { PaletteSelections } from '../utils/localStorageUtils';
 import { getDisplayColorKey, ColorSystem } from '../utils/colorSystemUtils';
 
+const colorSystemOptions: ColorSystem[] = ['MARD', 'COCO', '漫漫', '盼盼', '咪小窝'];
+
 // 对颜色进行分组的工具函数，按前缀分组
 function groupColorsByPrefix(colors: PaletteColor[], selectedColorSystem: ColorSystem): Record<string, PaletteColor[]> {
   const groups: Record<string, PaletteColor[]> = {};
@@ -75,6 +77,7 @@ interface CustomPaletteEditorProps {
   onImportCustomPalette: () => void;
   onApplyMard221Preset: () => void;
   selectedColorSystem: ColorSystem;
+  onColorSystemChange: (system: ColorSystem) => void;
 }
 
 const CustomPaletteEditor: React.FC<CustomPaletteEditorProps> = ({
@@ -87,6 +90,7 @@ const CustomPaletteEditor: React.FC<CustomPaletteEditorProps> = ({
   onImportCustomPalette,
   onApplyMard221Preset,
   selectedColorSystem,
+  onColorSystemChange,
 }) => {
   // 用于跟踪当前展开的颜色组
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
@@ -133,6 +137,12 @@ const CustomPaletteEditor: React.FC<CustomPaletteEditorProps> = ({
       onSelectionChange(color.hex.toUpperCase(), selected);
     });
   };
+
+  const handleColorSystemChange = (system: ColorSystem) => {
+    onColorSystemChange(system);
+    setExpandedGroups({});
+    setSearchTerm('');
+  };
   
   return (
     <div className="flex flex-col h-full max-h-[calc(90vh-80px)]">
@@ -154,6 +164,27 @@ const CustomPaletteEditor: React.FC<CustomPaletteEditorProps> = ({
         </button>
       </div>
       
+      {/* 色号系统选择 */}
+      <div className="mb-4">
+        <div className="flex flex-wrap gap-2">
+          {colorSystemOptions.map(system => (
+            <button
+              key={system}
+              type="button"
+              aria-pressed={selectedColorSystem === system}
+              onClick={() => handleColorSystemChange(system)}
+              className={`px-3 py-2 text-sm rounded-lg border transition-all duration-200 ${
+                selectedColorSystem === system
+                  ? 'bg-blue-500 text-white border-blue-500 shadow-sm'
+                  : 'bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 border-gray-300 dark:border-gray-600 hover:border-blue-400 dark:hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-gray-600'
+              }`}
+            >
+              {system}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* 搜索框 */}
       <div className="mb-4">
           <div className="relative">

@@ -92,6 +92,7 @@ import MagnifierSelectionOverlay from '../components/MagnifierSelectionOverlay';
 import { loadPaletteSelections, savePaletteSelections, presetToSelections, PaletteSelections } from '../utils/localStorageUtils';
 import { TRANSPARENT_KEY, transparentColorData } from '../utils/pixelEditingUtils';
 import { createMard221Selections } from '../utils/palettePresets';
+import { canColorAbsorbSimilarColor } from '../utils/colorMergePolicy';
 
 import FocusModePreDownloadModal from '../components/FocusModePreDownloadModal';
 
@@ -101,6 +102,7 @@ export default function Home() {
   const [granularityInput, setGranularityInput] = useState<string>("50");
   const [similarityThreshold, setSimilarityThreshold] = useState<number>(30);
   const [similarityThresholdInput, setSimilarityThresholdInput] = useState<string>("30");
+  const [protectBackgroundMergeTargets, setProtectBackgroundMergeTargets] = useState<boolean>(false);
   // 添加像素化模式状态
   const [pixelationMode, setPixelationMode] = useState<PixelationMode>(PixelationMode.Dominant); // 默认为卡通模式
   
@@ -743,6 +745,13 @@ export default function Home() {
     setSimilarityThresholdInput(event.target.value);
   };
 
+  const handleProtectBackgroundMergeTargetsChange = (event: ChangeEvent<HTMLInputElement>) => {
+    setProtectBackgroundMergeTargets(event.target.checked);
+    setRemapTrigger(prev => prev + 1);
+    setIsManualColoringMode(false);
+    setSelectedColor(null);
+  };
+
   // ++ 修改：处理确认按钮点击的函数，同时处理两个参数 ++
   const handleConfirmParameters = () => {
     // 处理格子数
@@ -808,8 +817,8 @@ export default function Home() {
   };
 
   // 修改pixelateImage函数接收模式参数
-  const pixelateImage = (imageSrc: string, detailLevel: number, threshold: number, currentPalette: PaletteColor[], mode: PixelationMode) => {
-    console.log(`Attempting to pixelate with detail: ${detailLevel}, threshold: ${threshold}, mode: ${mode}`);
+  const pixelateImage = (imageSrc: string, detailLevel: number, threshold: number, currentPalette: PaletteColor[], mode: PixelationMode, protectMergeTargets: boolean) => {
+    console.log(`Attempting to pixelate with detail: ${detailLevel}, threshold: ${threshold}, mode: ${mode}, protectMergeTargets: ${protectMergeTargets}`);
     const originalCanvas = originalCanvasRef.current;
     const pixelatedCanvas = pixelatedCanvasRef.current;
 
@@ -956,6 +965,12 @@ export default function Home() {
               console.warn(`RGB not found for key ${currentKey}. Skipping.`);
               continue;
           }
+
+          const currentColorData = keyToColorDataMap.get(currentKey);
+          if (currentColorData && !canColorAbsorbSimilarColor(currentColorData, protectMergeTargets)) {
+              console.log(`Skipping protected merge target ${currentKey}; it will not absorb similar lower-frequency colors.`);
+              continue;
+          }
           
           // 检查剩余的低频颜色
           for (let j = i + 1; j < colorsByFrequency.length; j++) {
@@ -1054,7 +1069,7 @@ export default function Home() {
        const timeoutId = setTimeout(() => {
          if (originalImageSrc && originalCanvasRef.current && pixelatedCanvasRef.current && activeBeadPalette.length > 0) {
            console.log("useEffect triggered: Processing image due to src, granularity, threshold, palette selection, mode or remap trigger.");
-           pixelateImage(originalImageSrc, granularity, similarityThreshold, activeBeadPalette, pixelationMode);
+           pixelateImage(originalImageSrc, granularity, similarityThreshold, activeBeadPalette, pixelationMode, protectBackgroundMergeTargets);
          } else {
             console.warn("useEffect check failed inside timeout: Refs or active palette not ready/empty.");
          }
@@ -1079,7 +1094,7 @@ export default function Home() {
         // setTotalBeadCount(0);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [originalImageSrc, granularity, similarityThreshold, customPaletteSelections, pixelationMode, remapTrigger]);
+  }, [originalImageSrc, granularity, similarityThreshold, customPaletteSelections, pixelationMode, protectBackgroundMergeTargets, remapTrigger]);
 
   // 确保文件输入框引用在组件挂载后正确设置
   useEffect(() => {
@@ -1954,6 +1969,11 @@ export default function Home() {
     return sortColorsByHue(selectedColors);
   }, [customPaletteSelections, selectedColorSystem]);
 
+  const selectedPaletteCount = useMemo(
+    () => Object.values(customPaletteSelections).filter(Boolean).length,
+    [customPaletteSelections]
+  );
+
   return (
     <>
     {/* 添加自定义动画样式 */}
@@ -2005,7 +2025,58 @@ export default function Home() {
     />
 
     {/* Apply dark mode styles to the main container */}
-    <div className="min-h-screen p-4 sm:p-6 flex flex-col items-center bg-gradient-to-b from-gray-50 to-white dark:from-gray-800 dark:to-gray-900 font-[family-name:var(--font-geist-sans)] overflow-x-hidden">
+    <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white dark:from-gray-800 dark:to-gray-900 font-[family-name:var(--font-geist-sans)] overflow-x-hidden">
+      <nav className="top-action-bar sticky top-0 z-40 w-full bg-stone-50/95 dark:bg-gray-900/95 border-b border-stone-200 dark:border-gray-700 shadow-sm backdrop-blur">
+        <div className="mx-auto flex w-full max-w-4xl items-center gap-3 overflow-x-auto px-4 py-2 sm:px-0 sm:py-3">
+          <button
+            type="button"
+            aria-label="色板设置"
+            onClick={() => setIsCustomPaletteEditorOpen(true)}
+            className="flex h-[78px] w-[92px] shrink-0 flex-col items-center justify-center rounded-xl border-2 border-stone-300 bg-white/80 px-3 text-stone-600 shadow-sm transition-colors hover:border-orange-400 hover:bg-orange-50 focus:outline-none focus:ring-2 focus:ring-orange-400 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:border-orange-500 dark:hover:bg-gray-800/80"
+          >
+            <span className="text-lg leading-5">{selectedColorSystem}</span>
+            <span className="mt-1 text-xl font-semibold leading-5">{selectedPaletteCount}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={isMounted ? triggerFileInput : undefined}
+            disabled={!isMounted}
+            className="flex h-[78px] w-[92px] shrink-0 items-center justify-center rounded-xl border-2 border-stone-300 bg-white/80 px-3 text-2xl text-stone-700 shadow-sm transition-colors hover:border-orange-400 hover:bg-orange-50 focus:outline-none focus:ring-2 focus:ring-orange-400 disabled:cursor-wait disabled:opacity-60 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:border-orange-500 dark:hover:bg-gray-800/80"
+          >
+            导入
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setIsDownloadSettingsOpen(true)}
+            disabled={!mappedPixelData || !gridDimensions || gridDimensions.N === 0 || gridDimensions.M === 0 || activeBeadPalette.length === 0}
+            className="flex h-[78px] w-[92px] shrink-0 items-center justify-center rounded-xl border-2 border-stone-300 bg-white/80 px-3 text-2xl text-stone-700 shadow-sm transition-colors hover:border-orange-400 hover:bg-orange-50 focus:outline-none focus:ring-2 focus:ring-orange-400 disabled:cursor-not-allowed disabled:opacity-45 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:border-orange-500 dark:hover:bg-gray-800/80"
+          >
+            下载
+          </button>
+
+          <button
+            type="button"
+            disabled
+            className="flex h-[78px] w-[92px] shrink-0 items-center justify-center rounded-xl border-2 border-orange-500 bg-orange-50 px-3 text-2xl text-orange-500 opacity-60 shadow-sm dark:bg-orange-950/30"
+          >
+            分享
+          </button>
+
+          <a
+            href="https://perlerbeads.zippland.com/gallery"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex h-[78px] w-[92px] shrink-0 items-center justify-center rounded-xl border-2 border-stone-300 bg-white/80 px-3 text-2xl text-stone-700 shadow-sm transition-colors hover:border-orange-400 hover:bg-orange-50 focus:outline-none focus:ring-2 focus:ring-orange-400 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:border-orange-500 dark:hover:bg-gray-800/80"
+          >
+            画廊
+          </a>
+        </div>
+      </nav>
+
+      <div className="p-4 sm:p-6 flex flex-col items-center">
+
       {/* Apply dark mode styles to the header */}
       <header className="w-full md:max-w-4xl text-center mt-6 mb-8 sm:mt-8 sm:mb-10 relative overflow-hidden">
         {/* Adjust decorative background colors for dark mode */}
@@ -2235,6 +2306,21 @@ export default function Home() {
                     </div>
                 </div>
 
+                <div className="sm:col-span-2">
+                  <label className="flex items-start gap-2 rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/30 px-3 py-2 text-sm text-gray-700 dark:text-gray-300">
+                    <input
+                      type="checkbox"
+                      checked={protectBackgroundMergeTargets}
+                      onChange={handleProtectBackgroundMergeTargetsChange}
+                      className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700"
+                    />
+                    <span>
+                      <span className="block font-medium">保护背景/近白色不吞色</span>
+                      <span className="block text-xs text-gray-500 dark:text-gray-400">背景、透明和近白色不会作为合并目标吸收其他颜色。</span>
+                    </span>
+                  </label>
+                </div>
+
                 {/* 快捷按钮 */}
                 <div className="sm:col-span-2 flex flex-wrap items-center gap-2">
                   <button
@@ -2306,40 +2392,11 @@ export default function Home() {
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                       <path fillRule="evenodd" d="M4 2a2 2 0 00-2 2v11a3 3 0 106 0V4a2 2 0 00-2-2H4zm1 14a1 1 0 100-2 1 1 0 000 2zm5-1.757l4.9-4.9a2 2 0 000-2.828L13.485 5.1a2 2 0 00-2.828 0L10 5.757v8.486zM16 18H9.071l6-6H16a2 2 0 012 2v2a2 2 0 01-2 2z" clipRule="evenodd" />
                     </svg>
-                    管理色板 ({Object.values(customPaletteSelections).filter(Boolean).length} 色)
+                    管理色板 ({selectedPaletteCount} 色)
                   </button>
                   {isCustomPalette && (
                     <p className="text-xs text-center text-blue-500 dark:text-blue-400 mt-1.5">当前使用自定义色板</p>
                   )}
-                </div>
-              </div>
-            )}
-
-            {/* 自定义色板编辑器弹窗 - 这是新增的部分 */}
-            {isCustomPaletteEditorOpen && (
-              <div className="fixed inset-0 bg-black bg-opacity-50 backdrop-blur-sm z-50 flex justify-center items-center p-4">
-                <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
-                   {/* 添加隐藏的文件输入框 */}
-                   <input
-                    type="file"
-                    accept=".json"
-                    ref={importPaletteInputRef}
-                    onChange={handleImportPaletteFile}
-                    className="hidden"
-                  />
-                  <div className="p-4 sm:p-6 flex-1 overflow-y-auto"> {/* 让内容区域可滚动 */}
-                    <CustomPaletteEditor
-                      allColors={fullBeadPalette}
-                      currentSelections={customPaletteSelections}
-                      onSelectionChange={handleSelectionChange}
-                      onSaveCustomPalette={handleSaveCustomPalette}
-                      onClose={() => setIsCustomPaletteEditorOpen(false)}
-                      onExportCustomPalette={handleExportCustomPalette}
-                      onImportCustomPalette={triggerImportPalette}
-                      onApplyMard221Preset={handleApplyMard221Preset}
-                      selectedColorSystem={selectedColorSystem}
-                    />
-                  </div>
                 </div>
               </div>
             )}
@@ -2705,6 +2762,36 @@ export default function Home() {
         onDownload={handleDownloadRequest}
       />
 
+      {/* 自定义色板编辑器弹窗 */}
+      {isCustomPaletteEditorOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 backdrop-blur-sm z-50 flex justify-center items-center p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+            {/* 添加隐藏的文件输入框 */}
+            <input
+              type="file"
+              accept=".json"
+              ref={importPaletteInputRef}
+              onChange={handleImportPaletteFile}
+              className="hidden"
+            />
+            <div className="p-4 sm:p-6 flex-1 overflow-y-auto">
+              <CustomPaletteEditor
+                allColors={fullBeadPalette}
+                currentSelections={customPaletteSelections}
+                onSelectionChange={handleSelectionChange}
+                onSaveCustomPalette={handleSaveCustomPalette}
+                onClose={() => setIsCustomPaletteEditorOpen(false)}
+                onExportCustomPalette={handleExportCustomPalette}
+                onImportCustomPalette={triggerImportPalette}
+                onApplyMard221Preset={handleApplyMard221Preset}
+                selectedColorSystem={selectedColorSystem}
+                onColorSystemChange={setSelectedColorSystem}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 专心拼豆模式进入前下载提醒弹窗 */}
       <FocusModePreDownloadModal
         isOpen={isFocusModePreDownloadModalOpen}
@@ -2722,6 +2809,7 @@ export default function Home() {
           {toastMessage}
         </div>
       )}
+      </div>
     </div>
    </>
   );
