@@ -187,4 +187,50 @@ export function recalculateColorStats(
   });
 
   return { colorCounts, totalCount };
-} 
+}
+
+/**
+ * 将用户选择的颜色标记为背景，并仅恢复由该过滤功能标记过的格子。
+ */
+export function applyBackgroundColorFilters(
+  pixelData: MappedPixel[][],
+  backgroundColorKeys: Set<string>
+): MappedPixel[][] {
+  const normalizedBackgroundColorKeys = new Set(
+    Array.from(backgroundColorKeys).map(key => key.toUpperCase())
+  );
+
+  return pixelData.map(row => row.map(cell => {
+    if (!cell) return cell;
+
+    const cellHex = cell.color.toUpperCase();
+    const shouldBeFiltered = normalizedBackgroundColorKeys.has(cellHex);
+
+    if (cell.isFilteredBackground && !shouldBeFiltered) {
+      const restoredCell = { ...cell };
+      delete restoredCell.isFilteredBackground;
+      return {
+        ...restoredCell,
+        isExternal: false
+      };
+    }
+
+    if (!cell.isExternal && shouldBeFiltered) {
+      return {
+        ...cell,
+        isExternal: true,
+        isFilteredBackground: true
+      };
+    }
+
+    if (cell.isFilteredBackground && shouldBeFiltered) {
+      return {
+        ...cell,
+        isExternal: true,
+        isFilteredBackground: true
+      };
+    }
+
+    return cell;
+  }));
+}

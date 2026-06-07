@@ -90,18 +90,26 @@ import FloatingToolbar from '../components/FloatingToolbar';
 import MagnifierTool from '../components/MagnifierTool';
 import MagnifierSelectionOverlay from '../components/MagnifierSelectionOverlay';
 import { loadPaletteSelections, savePaletteSelections, presetToSelections, PaletteSelections } from '../utils/localStorageUtils';
-import { TRANSPARENT_KEY, transparentColorData } from '../utils/pixelEditingUtils';
+import {
+  TRANSPARENT_KEY,
+  transparentColorData,
+  applyBackgroundColorFilters,
+  recalculateColorStats
+} from '../utils/pixelEditingUtils';
 import { createMard221Selections } from '../utils/palettePresets';
 import { canColorAbsorbSimilarColor } from '../utils/colorMergePolicy';
 
 import FocusModePreDownloadModal from '../components/FocusModePreDownloadModal';
 
+const DEFAULT_GRANULARITY = 50;
+const DEFAULT_SIMILARITY_THRESHOLD = 10;
+
 export default function Home() {
   const [originalImageSrc, setOriginalImageSrc] = useState<string | null>(null);
-  const [granularity, setGranularity] = useState<number>(50);
-  const [granularityInput, setGranularityInput] = useState<string>("50");
-  const [similarityThreshold, setSimilarityThreshold] = useState<number>(30);
-  const [similarityThresholdInput, setSimilarityThresholdInput] = useState<string>("30");
+  const [granularity, setGranularity] = useState<number>(DEFAULT_GRANULARITY);
+  const [granularityInput, setGranularityInput] = useState<string>(DEFAULT_GRANULARITY.toString());
+  const [similarityThreshold, setSimilarityThreshold] = useState<number>(DEFAULT_SIMILARITY_THRESHOLD);
+  const [similarityThresholdInput, setSimilarityThresholdInput] = useState<string>(DEFAULT_SIMILARITY_THRESHOLD.toString());
   const [protectBackgroundMergeTargets, setProtectBackgroundMergeTargets] = useState<boolean>(false);
   // 添加像素化模式状态
   const [pixelationMode, setPixelationMode] = useState<PixelationMode>(PixelationMode.Dominant); // 默认为卡通模式
@@ -115,6 +123,7 @@ export default function Home() {
   // 状态变量：存储被排除的颜色（hex值）
   const [excludedColorKeys, setExcludedColorKeys] = useState<Set<string>>(new Set());
   const [showExcludedColors, setShowExcludedColors] = useState<boolean>(false);
+  const [backgroundFilteredColorKeys, setBackgroundFilteredColorKeys] = useState<Set<string>>(new Set());
   // 用于记录初始网格颜色（hex值），用于显示排除功能
   const [initialGridColorKeys, setInitialGridColorKeys] = useState<Set<string>>(new Set());
   const [mappedPixelData, setMappedPixelData] = useState<MappedPixel[][] | null>(null);
@@ -216,6 +225,14 @@ export default function Home() {
 
   const handleActivateMagnifier = () => {
     setActiveFloatingTool('magnifier');
+  };
+
+  const handleEnterManualColoringMode = () => {
+    setIsManualColoringMode(true);
+    setIsFloatingPaletteOpen(true);
+    setActiveFloatingTool('palette');
+    setSelectedColor(null);
+    setTooltipData(null);
   };
 
   // --- 撤回功能 ---
@@ -373,6 +390,31 @@ export default function Home() {
     // 使用色相排序而不是色号排序
     return sortColorsByHue(colorData);
   }, [mappedPixelData, selectedColorSystem]);
+
+  const backgroundFilteredCounts = useMemo(() => {
+    const counts: { [hexKey: string]: { count: number; color: string } } = {};
+    if (!mappedPixelData) return counts;
+
+    mappedPixelData.flat().forEach(cell => {
+      if (cell?.isFilteredBackground && cell.color) {
+        const hexKey = cell.color.toUpperCase();
+        if (!counts[hexKey]) {
+          counts[hexKey] = { count: 0, color: hexKey };
+        }
+        counts[hexKey].count++;
+      }
+    });
+
+    return counts;
+  }, [mappedPixelData]);
+
+  const backgroundFilterColorKeys = useMemo(() => {
+    const keys = new Set<string>();
+    Object.keys(colorCounts || {}).forEach(key => keys.add(key.toUpperCase()));
+    Object.keys(backgroundFilteredCounts).forEach(key => keys.add(key.toUpperCase()));
+    backgroundFilteredColorKeys.forEach(key => keys.add(key.toUpperCase()));
+    return Array.from(keys).sort(sortColorKeys);
+  }, [colorCounts, backgroundFilteredCounts, backgroundFilteredColorKeys]);
 
   // 初始化时从本地存储加载自定义色板选择
   useEffect(() => {
@@ -636,6 +678,7 @@ export default function Home() {
           setColorCounts(colorCountsMap);
           setTotalBeadCount(totalCount);
           setInitialGridColorKeys(new Set(Object.keys(colorCountsMap)));
+          setBackgroundFilteredColorKeys(new Set());
           
           // 根据mappedPixelData生成合成的originalImageSrc
           const syntheticImageSrc = generateSyntheticImageFromPixelData(mappedPixelData, gridDimensions);
@@ -666,10 +709,12 @@ export default function Home() {
         setColorCounts(null);
         setTotalBeadCount(0);
         setInitialGridColorKeys(new Set()); // ++ 重置初始键 ++
+        setBackgroundFilteredColorKeys(new Set());
         // ++ 重置横轴格子数量为默认值 ++
-        const defaultGranularity = 100;
-        setGranularity(defaultGranularity);
-        setGranularityInput(defaultGranularity.toString());
+        setGranularity(DEFAULT_GRANULARITY);
+        setGranularityInput(DEFAULT_GRANULARITY.toString());
+        setSimilarityThreshold(DEFAULT_SIMILARITY_THRESHOLD);
+        setSimilarityThresholdInput(DEFAULT_SIMILARITY_THRESHOLD.toString());
         setRemapTrigger(prev => prev + 1); // Trigger full remap for new image
       };
 
@@ -750,6 +795,30 @@ export default function Home() {
     setRemapTrigger(prev => prev + 1);
     setIsManualColoringMode(false);
     setSelectedColor(null);
+  };
+
+  const handleToggleBackgroundColorFilter = (hexKey: string) => {
+    if (!mappedPixelData) return;
+
+    const normalizedHexKey = hexKey.toUpperCase();
+    const nextBackgroundFilteredColorKeys = new Set(backgroundFilteredColorKeys);
+    if (nextBackgroundFilteredColorKeys.has(normalizedHexKey)) {
+      nextBackgroundFilteredColorKeys.delete(normalizedHexKey);
+    } else {
+      nextBackgroundFilteredColorKeys.add(normalizedHexKey);
+    }
+
+    const nextMappedPixelData = applyBackgroundColorFilters(mappedPixelData, nextBackgroundFilteredColorKeys);
+    const stats = recalculateColorStats(nextMappedPixelData);
+
+    setBackgroundFilteredColorKeys(nextBackgroundFilteredColorKeys);
+    setMappedPixelData(nextMappedPixelData);
+    setColorCounts(stats.colorCounts);
+    setTotalBeadCount(stats.totalCount);
+    setIsManualColoringMode(false);
+    setSelectedColor(null);
+    clearEditHistory();
+    setBgRemovalSnapshot(null);
   };
 
   // ++ 修改：处理确认按钮点击的函数，同时处理两个参数 ++
@@ -1023,28 +1092,18 @@ export default function Home() {
 
       // --- 绘制和状态更新 ---
       if (pixelatedCanvasRef.current) {
-        setMappedPixelData(mergedData);
-        setGridDimensions({ N, M });
+        const unfilteredStats = recalculateColorStats(mergedData);
+        const dataForState = applyBackgroundColorFilters(mergedData, backgroundFilteredColorKeys);
+        const stats = recalculateColorStats(dataForState);
 
-        const counts: { [key: string]: { count: number; color: string } } = {};
-        let totalCount = 0;
-        mergedData.flat().forEach(cell => {
-          if (cell && cell.key && !cell.isExternal) {
-            // 使用hex值作为统计键值，而不是色号
-            const hexKey = cell.color;
-            if (!counts[hexKey]) {
-              counts[hexKey] = { count: 0, color: cell.color };
-            }
-            counts[hexKey].count++;
-            totalCount++;
-          }
-        });
-        setColorCounts(counts);
-        setTotalBeadCount(totalCount);
-        setInitialGridColorKeys(new Set(Object.keys(counts)));
-        console.log("Color counts updated based on merged data (after merging):", counts);
-        console.log("Total bead count (total beads):", totalCount);
-        console.log("Stored initial grid color keys:", Object.keys(counts));
+        setMappedPixelData(dataForState);
+        setGridDimensions({ N, M });
+        setColorCounts(stats.colorCounts);
+        setTotalBeadCount(stats.totalCount);
+        setInitialGridColorKeys(new Set(Object.keys(unfilteredStats.colorCounts)));
+        console.log("Color counts updated based on merged data (after merging):", stats.colorCounts);
+        console.log("Total bead count (total beads):", stats.totalCount);
+        console.log("Stored initial grid color keys:", Object.keys(unfilteredStats.colorCounts));
       } else {
         console.error("Pixelated canvas ref is null, skipping draw call in pixelateImage.");
       }
@@ -2462,7 +2521,7 @@ export default function Home() {
         )}
 
         {/* ++ HIDE Color Counts in manual mode ++ */}
-        {!isManualColoringMode && originalImageSrc && colorCounts && Object.keys(colorCounts).length > 0 && (
+        {!isManualColoringMode && originalImageSrc && colorCounts && (Object.keys(colorCounts).length > 0 || backgroundFilteredColorKeys.size > 0) && (
           // Apply dark mode styles to color counts container
           <div className="w-full md:max-w-2xl mt-6 bg-white dark:bg-gray-800 p-4 rounded-lg shadow border border-gray-100 dark:border-gray-700 color-stats-panel">
             {/* Title color */}
@@ -2507,8 +2566,57 @@ export default function Home() {
                     </li>
                   );
                 })}
-            </ul>
-            {excludedColorKeys.size > 0 && (
+	            </ul>
+	            {backgroundFilterColorKeys.length > 0 && (
+	              <div className="mt-4 border-t border-gray-200 dark:border-gray-700 pt-3">
+	                <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-1">
+	                  过滤背景色
+	                </h4>
+	                <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+	                  勾选后该颜色会被标记为背景，预览、下载图纸和统计中不再输出色号。
+	                </p>
+	                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-44 overflow-y-auto pr-1">
+	                  {backgroundFilterColorKeys.map((hexKey) => {
+	                    const normalizedHexKey = hexKey.toUpperCase();
+	                    const isFilteredBackground = backgroundFilteredColorKeys.has(normalizedHexKey);
+	                    const visibleCount = colorCounts?.[normalizedHexKey]?.count ?? 0;
+	                    const filteredCount = backgroundFilteredCounts[normalizedHexKey]?.count ?? 0;
+	                    const count = visibleCount + filteredCount;
+	                    const colorHex = colorCounts?.[normalizedHexKey]?.color ?? backgroundFilteredCounts[normalizedHexKey]?.color ?? normalizedHexKey;
+	                    const displayColorKey = getColorKeyByHex(normalizedHexKey, selectedColorSystem);
+
+	                    return (
+	                      <label
+	                        key={normalizedHexKey}
+	                        className={`flex items-center justify-between gap-2 rounded-md border px-2 py-1.5 text-xs cursor-pointer transition-colors ${
+	                          isFilteredBackground
+	                            ? 'border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-700 dark:bg-amber-900/30 dark:text-amber-200'
+	                            : 'border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100 dark:border-gray-700 dark:bg-gray-900/30 dark:text-gray-300 dark:hover:bg-gray-700'
+	                        }`}
+	                      >
+	                        <span className="flex items-center gap-2 min-w-0">
+	                          <input
+	                            type="checkbox"
+	                            checked={isFilteredBackground}
+	                            onChange={() => handleToggleBackgroundColorFilter(normalizedHexKey)}
+	                            className="h-4 w-4 rounded border-gray-300 text-amber-600 focus:ring-amber-500 dark:border-gray-600 dark:bg-gray-700"
+	                          />
+	                          <span
+	                            className="inline-block h-4 w-4 rounded border border-gray-400 dark:border-gray-500 flex-shrink-0"
+	                            style={{ backgroundColor: colorHex }}
+	                          ></span>
+	                          <span className="font-mono font-medium truncate">{displayColorKey}</span>
+	                        </span>
+	                        <span className="text-[11px] flex-shrink-0">
+	                          {isFilteredBackground ? `已设背景 · ${count} 格` : `${count} 颗`}
+	                        </span>
+	                      </label>
+	                    );
+	                  })}
+	                </div>
+	              </div>
+	            )}
+	            {excludedColorKeys.size > 0 && (
                 <div className="mt-3">
                   <button
                     onClick={() => setShowExcludedColors(prev => !prev)}
@@ -2619,11 +2727,7 @@ export default function Home() {
             <div className="w-full md:max-w-2xl mt-4 space-y-3"> {/* Wrapper div */} 
              {/* Manual Edit Mode Button */}
              <button
-                onClick={() => {
-                  setIsManualColoringMode(true); // Enter mode
-                  setSelectedColor(null);
-                  setTooltipData(null);
-                }}
+                onClick={handleEnterManualColoringMode}
                 className={`w-full py-2.5 px-4 text-sm sm:text-base rounded-lg transition-all duration-300 flex items-center justify-center gap-2 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white shadow-md hover:shadow-lg hover:translate-y-[-1px]`}
               >
                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"> <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" /> </svg>

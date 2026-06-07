@@ -32,6 +32,7 @@ export interface MappedPixel {
   key: string;
   color: string;
   isExternal?: boolean;
+  isFilteredBackground?: boolean;
 }
 
 // --- 辅助函数 ---
