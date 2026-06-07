@@ -73,6 +73,7 @@ interface CustomPaletteEditorProps {
   onClose: () => void;
   onExportCustomPalette: () => void;
   onImportCustomPalette: () => void;
+  onApplyMard221Preset: () => void;
   selectedColorSystem: ColorSystem;
 }
 
@@ -84,6 +85,7 @@ const CustomPaletteEditor: React.FC<CustomPaletteEditorProps> = ({
   onClose,
   onExportCustomPalette,
   onImportCustomPalette,
+  onApplyMard221Preset,
   selectedColorSystem,
 }) => {
   // 用于跟踪当前展开的颜色组
@@ -193,6 +195,12 @@ const CustomPaletteEditor: React.FC<CustomPaletteEditorProps> = ({
           className="px-3 py-1.5 text-xs bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300 rounded-md hover:bg-red-200 dark:hover:bg-red-900/50"
         >
           全不选
+        </button>
+        <button
+          onClick={onApplyMard221Preset}
+          className="px-3 py-1.5 text-xs bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300 rounded-md hover:bg-amber-200 dark:hover:bg-amber-900/50"
+        >
+          MARD 221
         </button>
         <button
           onClick={onImportCustomPalette}

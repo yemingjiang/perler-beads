@@ -92,6 +92,7 @@ import MagnifierTool from '../components/MagnifierTool';
 import MagnifierSelectionOverlay from '../components/MagnifierSelectionOverlay';
 import { loadPaletteSelections, savePaletteSelections, presetToSelections, PaletteSelections } from '../utils/localStorageUtils';
 import { TRANSPARENT_KEY, transparentColorData } from '../utils/pixelEditingUtils';
+import { createMard221Selections } from '../utils/palettePresets';
 
 // 1. 导入新的 DonationModal 组件
 import DonationModal from '../components/DonationModal';
@@ -1683,6 +1684,13 @@ export default function Home() {
     setIsCustomPalette(true);
   };
 
+  const handleApplyMard221Preset = () => {
+    setCustomPaletteSelections(
+      createMard221Selections(fullBeadPalette, (hexValue) => getColorKeyByHex(hexValue, 'MARD'))
+    );
+    setIsCustomPalette(true);
+  };
+
   // 保存自定义色板并应用
   const handleSaveCustomPalette = () => {
     savePaletteSelections(customPaletteSelections);
@@ -2414,6 +2422,7 @@ export default function Home() {
                       onClose={() => setIsCustomPaletteEditorOpen(false)}
                       onExportCustomPalette={handleExportCustomPalette}
                       onImportCustomPalette={triggerImportPalette}
+                      onApplyMard221Preset={handleApplyMard221Preset}
                       selectedColorSystem={selectedColorSystem}
                     />
                   </div>

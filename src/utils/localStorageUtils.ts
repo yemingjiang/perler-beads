@@ -4,12 +4,31 @@ export interface PaletteSelections {
   [hexValue: string]: boolean;
 }
 
+function getBrowserLocalStorage(): Storage | null {
+  if (
+    typeof window === 'undefined' ||
+    !window.localStorage ||
+    typeof window.localStorage.getItem !== 'function' ||
+    typeof window.localStorage.setItem !== 'function' ||
+    typeof window.localStorage.removeItem !== 'function'
+  ) {
+    return null;
+  }
+
+  return window.localStorage;
+}
+
 /**
  * 保存自定义色板选择状态到localStorage
  */
 export function savePaletteSelections(selections: PaletteSelections): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(selections));
+    const storage = getBrowserLocalStorage();
+    if (!storage) {
+      return;
+    }
+
+    storage.setItem(STORAGE_KEY, JSON.stringify(selections));
   } catch (error) {
     console.error("无法保存色板选择到本地存储:", error);
   }
@@ -20,13 +39,18 @@ export function savePaletteSelections(selections: PaletteSelections): void {
  */
 export function loadPaletteSelections(): PaletteSelections | null {
   try {
-    const stored = localStorage.getItem(STORAGE_KEY);
+    const storage = getBrowserLocalStorage();
+    if (!storage) {
+      return null;
+    }
+
+    const stored = storage.getItem(STORAGE_KEY);
     if (stored) {
       return JSON.parse(stored);
     }
   } catch (error) {
     console.error("无法从本地存储加载色板选择:", error);
-    localStorage.removeItem(STORAGE_KEY); // 清除无效数据
+    getBrowserLocalStorage()?.removeItem(STORAGE_KEY); // 清除无效数据
   }
   return null;
 }
